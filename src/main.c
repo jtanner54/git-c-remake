@@ -3,7 +3,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include "zpipe.c"
+#include "zpipe.h"
 
 int main(int argc, char *argv[]) {
     // Disable output buffering
