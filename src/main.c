@@ -3,11 +3,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <dirent.h>
-#include "zlib.h"
-#include <assert.h>
-
-#define CHUNK 16384
+#include "zpipe.c"
 
 int main(int argc, char *argv[]) {
     // Disable output buffering
@@ -61,64 +57,42 @@ int main(int argc, char *argv[]) {
         strcat(full_path, second_part_filename);
         strcat(full_path, third_part_filename);
 
-        FILE* file = fopen(full_path, "r");
+        FILE* file = fopen(full_path, "rb");
         if (file == NULL) {
             fprintf(stderr, "CAN'T OPEN FILE: %s\n", strerror(errno));
         }
 
-        int ret;
-        unsigned have;
-        z_stream strm;
-        unsigned char in[CHUNK];
-        unsigned char out[CHUNK];
+        fflush(stdout);
+        FILE* dest_file = tmpfile();
+        int ret = inf(file, dest_file);
+        if (ret != Z_OK) {
+            fprintf(stderr, "Decompression failed with error code: %d\n", ret);
+            if (ret == Z_MEM_ERROR) fprintf(stderr, "Out of memory\n");
+            if (ret == Z_DATA_ERROR) fprintf(stderr, "Invalid or incomplete deflate data\n");
+            if (ret == Z_VERSION_ERROR) fprintf(stderr, "zlib version mismatch\n");
+            return 1;
+        }
 
-        strm.zalloc = Z_NULL;
-        strm.zfree = Z_NULL;
-        strm.opaque = Z_NULL;
-        strm.avail_in = 0;
-        strm.next_in = Z_NULL;
-        ret = inflateInit(&strm);
-        if (ret != Z_OK) 
-            return ret;
+        // reset pointer to start of file
+        rewind(dest_file);
 
-        do {
-            strm.avail_in = fread(in, 1, CHUNK, file);
-            if (ferror(file)) {
-                (void)inflateEnd(&strm);
-                return Z_ERRNO;
+        if (dest_file != NULL) {
+            char ch;
+            int occurence = 0;
+
+            while ((ch = fgetc(dest_file)) != EOF) {
+                // have to get rid of Git adds a space 
+                // followed by the size in bytes of the content, and adding a final null byte:
+                if (ch == '\0' && occurence == 0) {
+                    occurence += 1;
+                    continue;
+                }
+                if (occurence > 0)
+                    printf("%c", ch);
             }
-            if (strm.avail_in == 0)
-                break;
-            strm.next_in = in;
+        }
 
-            do {
-                strm.avail_out = CHUNK;
-                strm.next_out = out;
-                ret = inflate(&strm, Z_NO_FLUSH);
-                assert(ret != Z_STREAM_ERROR);
-
-                switch (ret) {
-                case Z_NEED_DICT:
-                    ret = Z_DATA_ERROR;
-                case Z_DATA_ERROR:
-                case Z_MEM_ERROR:
-                    (void)inflateEnd(&strm);
-                    return ret;
-                }
-
-                have = CHUNK - strm.avail_out;
-                if (fwrite(out, 1, have, stdout) != have || ferror(stdout)) {
-                    (void)inflateEnd(&strm);
-                    return Z_ERRNO;
-                }
-            } while (strm.avail_out == 0);
-        } while (ret != Z_STREAM_END);
-
-        (void)inflateEnd(&strm);
-        ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
-        if (ret == Z_OK)
-        printf("%d\n", ret);
-
+        fclose(dest_file);
         fclose(file);
     } else {
         fprintf(stderr, "Unknown command %s\n", command);
