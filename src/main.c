@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include "zpipe.h"
+#include <zlib.h>
 
 int main(int argc, char *argv[]) {
     // Disable output buffering
